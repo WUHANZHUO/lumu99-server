@@ -1,0 +1,247 @@
+CREATE TABLE users (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    user_uuid CHAR(36) NOT NULL,
+    username VARCHAR(64) NOT NULL,
+    weibo_name VARCHAR(64) NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    role VARCHAR(16) NOT NULL DEFAULT 'USER',
+    status VARCHAR(16) NOT NULL DEFAULT 'ACTIVE',
+    mute_status VARCHAR(16) NOT NULL DEFAULT 'NORMAL',
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    CONSTRAINT uk_users_user_uuid UNIQUE (user_uuid),
+    CONSTRAINT uk_users_username UNIQUE (username),
+    CONSTRAINT uk_users_weibo_name UNIQUE (weibo_name)
+);
+
+CREATE TABLE admin_settings (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    world_guest_visible BOOLEAN NOT NULL DEFAULT FALSE,
+    events_guest_visible BOOLEAN NOT NULL DEFAULT FALSE,
+    forum_post_need_review BOOLEAN NOT NULL DEFAULT FALSE,
+    user_dm_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
+);
+
+CREATE TABLE forum_tags (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    name VARCHAR(64) NOT NULL,
+    admin_only BOOLEAN NOT NULL DEFAULT FALSE,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    CONSTRAINT uk_forum_tags_name UNIQUE (name)
+);
+
+CREATE TABLE forbidden_words (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    word VARCHAR(128) NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    CONSTRAINT uk_forbidden_words_word UNIQUE (word)
+);
+
+CREATE TABLE quiz_questions (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    question_type VARCHAR(32) NOT NULL,
+    stem VARCHAR(512) NOT NULL,
+    answer_text VARCHAR(512) NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
+);
+
+CREATE TABLE quiz_options (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    question_id BIGINT NOT NULL,
+    option_key VARCHAR(32) NOT NULL,
+    option_text VARCHAR(512) NOT NULL,
+    is_correct BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    CONSTRAINT fk_quiz_options_question_id FOREIGN KEY (question_id) REFERENCES quiz_questions (id)
+);
+
+CREATE TABLE quiz_config (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    question_count INT NOT NULL DEFAULT 3,
+    pass_score INT NOT NULL DEFAULT 0,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
+);
+
+CREATE TABLE invite_codes (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    code VARCHAR(128) NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'UNUSED',
+    expires_at DATETIME(3) NULL,
+    used_by_user_uuid CHAR(36) NULL,
+    used_at DATETIME(3) NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    CONSTRAINT uk_invite_codes_code UNIQUE (code)
+);
+
+CREATE TABLE forum_posts (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    author_uuid CHAR(36) NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    content TEXT NOT NULL,
+    review_status VARCHAR(16) NOT NULL DEFAULT 'PENDING',
+    is_pinned BOOLEAN NOT NULL DEFAULT FALSE,
+    reject_reason VARCHAR(512) NULL,
+    published_at DATETIME(3) NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
+);
+
+CREATE TABLE forum_post_tag_rel (
+    post_id BIGINT NOT NULL,
+    tag_id BIGINT NOT NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    PRIMARY KEY (post_id, tag_id),
+    CONSTRAINT fk_forum_post_tag_rel_post_id FOREIGN KEY (post_id) REFERENCES forum_posts (id),
+    CONSTRAINT fk_forum_post_tag_rel_tag_id FOREIGN KEY (tag_id) REFERENCES forum_tags (id)
+);
+
+CREATE TABLE forum_comments (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    post_id BIGINT NOT NULL,
+    author_uuid CHAR(36) NOT NULL,
+    content TEXT NOT NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    CONSTRAINT fk_forum_comments_post_id FOREIGN KEY (post_id) REFERENCES forum_posts (id)
+);
+
+CREATE TABLE content_story (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    title VARCHAR(255) NOT NULL,
+    body TEXT NULL,
+    resource_url VARCHAR(512) NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'PUBLISHED',
+    is_pinned BOOLEAN NOT NULL DEFAULT FALSE,
+    created_by CHAR(36) NOT NULL,
+    updated_by CHAR(36) NOT NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
+);
+
+CREATE TABLE content_timeline (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    title VARCHAR(255) NOT NULL,
+    body TEXT NULL,
+    resource_url VARCHAR(512) NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'PUBLISHED',
+    is_pinned BOOLEAN NOT NULL DEFAULT FALSE,
+    created_by CHAR(36) NOT NULL,
+    updated_by CHAR(36) NOT NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
+);
+
+CREATE TABLE content_photo (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    title VARCHAR(255) NOT NULL,
+    body TEXT NULL,
+    resource_url VARCHAR(512) NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'PUBLISHED',
+    is_pinned BOOLEAN NOT NULL DEFAULT FALSE,
+    created_by CHAR(36) NOT NULL,
+    updated_by CHAR(36) NOT NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
+);
+
+CREATE TABLE content_video (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    title VARCHAR(255) NOT NULL,
+    body TEXT NULL,
+    resource_url VARCHAR(512) NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'PUBLISHED',
+    is_pinned BOOLEAN NOT NULL DEFAULT FALSE,
+    created_by CHAR(36) NOT NULL,
+    updated_by CHAR(36) NOT NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
+);
+
+CREATE TABLE content_world (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    title VARCHAR(255) NOT NULL,
+    body TEXT NULL,
+    resource_url VARCHAR(512) NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'PUBLISHED',
+    is_pinned BOOLEAN NOT NULL DEFAULT FALSE,
+    created_by CHAR(36) NOT NULL,
+    updated_by CHAR(36) NOT NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
+);
+
+CREATE TABLE content_event (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    title VARCHAR(255) NOT NULL,
+    body TEXT NULL,
+    resource_url VARCHAR(512) NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'PUBLISHED',
+    is_pinned BOOLEAN NOT NULL DEFAULT FALSE,
+    created_by CHAR(36) NOT NULL,
+    updated_by CHAR(36) NOT NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
+);
+
+CREATE TABLE votes (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    target_type VARCHAR(32) NOT NULL,
+    target_id BIGINT NOT NULL,
+    user_uuid CHAR(36) NOT NULL,
+    vote_type VARCHAR(16) NOT NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    CONSTRAINT uk_votes_target_user UNIQUE (target_type, target_id, user_uuid)
+);
+
+CREATE TABLE dm_threads (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    user_a_uuid CHAR(36) NOT NULL,
+    user_b_uuid CHAR(36) NOT NULL,
+    last_message_at DATETIME(3) NULL,
+    last_message_preview VARCHAR(255) NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
+);
+
+CREATE TABLE dm_messages (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    thread_id BIGINT NOT NULL,
+    from_uuid CHAR(36) NOT NULL,
+    to_uuid CHAR(36) NOT NULL,
+    content TEXT NOT NULL,
+    is_read BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    CONSTRAINT fk_dm_messages_thread_id FOREIGN KEY (thread_id) REFERENCES dm_threads (id)
+);
+
+CREATE TABLE audit_logs (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    operator_uuid CHAR(36) NULL,
+    operator_role VARCHAR(16) NULL,
+    action VARCHAR(128) NOT NULL,
+    target_type VARCHAR(64) NULL,
+    target_id VARCHAR(64) NULL,
+    request_payload TEXT NULL,
+    result VARCHAR(32) NOT NULL,
+    ip VARCHAR(64) NULL,
+    user_agent VARCHAR(512) NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
+);
+
+INSERT INTO admin_settings (id, world_guest_visible, events_guest_visible, forum_post_need_review, user_dm_enabled)
+VALUES (1, FALSE, FALSE, FALSE, TRUE);
+
+INSERT INTO quiz_config (id, question_count, pass_score)
+VALUES (1, 3, 0);
