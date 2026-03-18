@@ -1,191 +1,153 @@
 package com.lumu99.forum.forum.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.lumu99.forum.common.enums.ReviewStatus;
+import com.lumu99.forum.common.enums.UserRole;
 import com.lumu99.forum.common.exception.BusinessException;
+import com.lumu99.forum.common.security.SecurityContextHelper;
+import com.lumu99.forum.domain.ForumPost;
+import com.lumu99.forum.domain.ForumPostTagRel;
+import com.lumu99.forum.domain.ForumTag;
+import com.lumu99.forum.dto.request.CreatePostRequest;
+import com.lumu99.forum.dto.request.UpdatePostRequest;
+import com.lumu99.forum.dto.response.PostResponse;
+import com.lumu99.forum.mapper.ForumPostMapper;
+import com.lumu99.forum.mapper.ForumPostTagRelMapper;
+import com.lumu99.forum.mapper.ForumTagMapper;
 import com.lumu99.forum.review.service.ReviewDecisionEngine;
 import org.springframework.http.HttpStatus;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.support.GeneratedKeyHolder;
-import org.springframework.jdbc.support.KeyHolder;
-import org.springframework.security.authentication.AnonymousAuthenticationToken;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.GrantedAuthority;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-import java.sql.PreparedStatement;
-import java.sql.Timestamp;
-import java.time.Instant;
-import java.util.ArrayList;
+import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
-import java.util.stream.Collectors;
 
 @Service
 public class ForumPostService {
 
-    private final JdbcTemplate jdbcTemplate;
+    private final ForumPostMapper forumPostMapper;
+    private final ForumPostTagRelMapper forumPostTagRelMapper;
+    private final ForumTagMapper forumTagMapper;
     private final ReviewDecisionEngine reviewDecisionEngine;
 
-    public ForumPostService(JdbcTemplate jdbcTemplate, ReviewDecisionEngine reviewDecisionEngine) {
-        this.jdbcTemplate = jdbcTemplate;
+    public ForumPostService(ForumPostMapper forumPostMapper,
+                            ForumPostTagRelMapper forumPostTagRelMapper,
+                            ForumTagMapper forumTagMapper,
+                            ReviewDecisionEngine reviewDecisionEngine) {
+        this.forumPostMapper = forumPostMapper;
+        this.forumPostTagRelMapper = forumPostTagRelMapper;
+        this.forumTagMapper = forumTagMapper;
         this.reviewDecisionEngine = reviewDecisionEngine;
     }
 
-    public PostView createPost(CreatePostCommand command) {
-        CurrentUser user = currentUser();
-        validateTagPolicy(command.tagIds(), user.role());
+    public List<PostResponse> listPosts() {
+        return forumPostMapper.selectList(
+                new LambdaQueryWrapper<ForumPost>()
+                        .orderByDesc(ForumPost::getIsPinned)
+                        .orderByDesc(ForumPost::getId)
+        ).stream().map(PostResponse::from).toList();
+    }
 
-        String reviewStatus = reviewDecisionEngine.decideReviewStatus(user.role(), command.title(), command.content());
-        Timestamp publishedAt = "APPROVED".equals(reviewStatus) ? Timestamp.from(Instant.now()) : null;
+    @Transactional
+    public PostResponse createPost(CreatePostRequest request) {
+        String userUuid = SecurityContextHelper.currentUserUuid();
+        String role = SecurityContextHelper.currentUserRole();
+        validateTagPolicy(request.tagIds(), role);
 
-        KeyHolder keyHolder = new GeneratedKeyHolder();
-        jdbcTemplate.update(connection -> {
-            PreparedStatement ps = connection.prepareStatement(
-                    "INSERT INTO forum_posts (author_uuid, title, content, review_status, is_pinned, published_at) VALUES (?, ?, ?, ?, false, ?)",
-                    new String[]{"id"}
-            );
-            ps.setString(1, user.userUuid());
-            ps.setString(2, command.title());
-            ps.setString(3, command.content());
-            ps.setString(4, reviewStatus);
-            ps.setTimestamp(5, publishedAt);
-            return ps;
-        }, keyHolder);
+        ReviewStatus reviewStatus = reviewDecisionEngine.decideReviewStatus(role, request.title(), request.content());
 
-        Long postId = keyHolder.getKey() == null ? null : keyHolder.getKey().longValue();
-        if (postId == null) {
-            throw new IllegalStateException("Failed to create post");
+        ForumPost post = new ForumPost();
+        post.setAuthorUuid(userUuid);
+        post.setTitle(request.title());
+        post.setContent(request.content());
+        post.setReviewStatus(reviewStatus);
+        post.setIsPinned(false);
+        if (reviewStatus == ReviewStatus.APPROVED) {
+            post.setPublishedAt(LocalDateTime.now());
         }
+        forumPostMapper.insert(post);
 
-        for (Long tagId : command.tagIds()) {
-            jdbcTemplate.update("INSERT INTO forum_post_tag_rel (post_id, tag_id) VALUES (?, ?)", postId, tagId);
-        }
-
-        return getPost(postId).orElseThrow(() -> new IllegalStateException("Created post not found"));
+        saveTagRels(post.getId(), request.tagIds());
+        return PostResponse.from(forumPostMapper.selectById(post.getId()));
     }
 
-    public List<PostView> listPosts() {
-        return jdbcTemplate.query(
-                "SELECT id, author_uuid, title, content, review_status, is_pinned FROM forum_posts ORDER BY is_pinned DESC, id DESC",
-                (rs, rowNum) -> new PostView(
-                        rs.getLong("id"),
-                        rs.getString("author_uuid"),
-                        rs.getString("title"),
-                        rs.getString("content"),
-                        rs.getString("review_status"),
-                        rs.getBoolean("is_pinned")
-                )
-        );
+    public Optional<PostResponse> getPost(Long postId) {
+        ForumPost post = forumPostMapper.selectById(postId);
+        return Optional.ofNullable(post).map(PostResponse::from);
     }
 
-    public Optional<PostView> getPost(Long postId) {
-        List<PostView> posts = jdbcTemplate.query(
-                "SELECT id, author_uuid, title, content, review_status, is_pinned FROM forum_posts WHERE id = ?",
-                (rs, rowNum) -> new PostView(
-                        rs.getLong("id"),
-                        rs.getString("author_uuid"),
-                        rs.getString("title"),
-                        rs.getString("content"),
-                        rs.getString("review_status"),
-                        rs.getBoolean("is_pinned")
-                ),
-                postId
-        );
-        return posts.stream().findFirst();
-    }
+    @Transactional
+    public PostResponse updatePost(Long postId, UpdatePostRequest request) {
+        String role = SecurityContextHelper.currentUserRole();
+        validateTagPolicy(request.tagIds(), role);
 
-    public PostView updatePost(Long postId, UpdatePostCommand command) {
-        CurrentUser user = currentUser();
-        validateTagPolicy(command.tagIds(), user.role());
-
-        int updated = jdbcTemplate.update(
-                "UPDATE forum_posts SET title = ?, content = ? WHERE id = ?",
-                command.title(),
-                command.content(),
-                postId
-        );
-        if (updated == 0) {
+        ForumPost post = forumPostMapper.selectById(postId);
+        if (post == null) {
             throw new BusinessException(HttpStatus.NOT_FOUND, "REQ_404_NOT_FOUND", "Post not found");
         }
-        jdbcTemplate.update("DELETE FROM forum_post_tag_rel WHERE post_id = ?", postId);
-        for (Long tagId : command.tagIds()) {
-            jdbcTemplate.update("INSERT INTO forum_post_tag_rel (post_id, tag_id) VALUES (?, ?)", postId, tagId);
-        }
-        return getPost(postId).orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "REQ_404_NOT_FOUND", "Post not found"));
+        post.setTitle(request.title());
+        post.setContent(request.content());
+        forumPostMapper.updateById(post);
+
+        forumPostTagRelMapper.delete(new LambdaQueryWrapper<ForumPostTagRel>().eq(ForumPostTagRel::getPostId, postId));
+        saveTagRels(postId, request.tagIds());
+        return PostResponse.from(forumPostMapper.selectById(postId));
     }
 
+    @Transactional
     public void deletePost(Long postId) {
-        jdbcTemplate.update("DELETE FROM forum_post_tag_rel WHERE post_id = ?", postId);
-        jdbcTemplate.update("DELETE FROM forum_posts WHERE id = ?", postId);
+        forumPostTagRelMapper.delete(new LambdaQueryWrapper<ForumPostTagRel>().eq(ForumPostTagRel::getPostId, postId));
+        forumPostMapper.deleteById(postId);
     }
 
-    public PostView pinPost(Long postId) {
-        CurrentUser user = currentUser();
-        requireAdmin(user.role());
-        jdbcTemplate.update("UPDATE forum_posts SET is_pinned = true WHERE id = ?", postId);
-        return getPost(postId).orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "REQ_404_NOT_FOUND", "Post not found"));
+    public PostResponse pinPost(Long postId) {
+        requireAdmin();
+        ForumPost post = forumPostMapper.selectById(postId);
+        if (post == null) {
+            throw new BusinessException(HttpStatus.NOT_FOUND, "REQ_404_NOT_FOUND", "Post not found");
+        }
+        post.setIsPinned(true);
+        forumPostMapper.updateById(post);
+        return PostResponse.from(post);
     }
 
-    public PostView unpinPost(Long postId) {
-        CurrentUser user = currentUser();
-        requireAdmin(user.role());
-        jdbcTemplate.update("UPDATE forum_posts SET is_pinned = false WHERE id = ?", postId);
-        return getPost(postId).orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "REQ_404_NOT_FOUND", "Post not found"));
+    public PostResponse unpinPost(Long postId) {
+        requireAdmin();
+        ForumPost post = forumPostMapper.selectById(postId);
+        if (post == null) {
+            throw new BusinessException(HttpStatus.NOT_FOUND, "REQ_404_NOT_FOUND", "Post not found");
+        }
+        post.setIsPinned(false);
+        forumPostMapper.updateById(post);
+        return PostResponse.from(post);
     }
 
     private void validateTagPolicy(List<Long> tagIds, String role) {
-        if (tagIds == null || tagIds.isEmpty() || "ADMIN".equals(role)) {
+        if (tagIds == null || tagIds.isEmpty() || UserRole.ADMIN.name().equals(role)) {
             return;
         }
-        String placeholders = tagIds.stream().map(id -> "?").collect(Collectors.joining(","));
-        String sql = "SELECT id, admin_only FROM forum_tags WHERE id IN (" + placeholders + ")";
-        List<Map<String, Object>> tags = jdbcTemplate.queryForList(sql, tagIds.toArray());
-        for (Map<String, Object> tag : tags) {
-            Object adminOnly = tag.get("admin_only");
-            boolean isAdminOnly = adminOnly instanceof Boolean b ? b : Integer.parseInt(String.valueOf(adminOnly)) != 0;
-            if (isAdminOnly) {
-                throw new BusinessException(
-                        HttpStatus.UNPROCESSABLE_ENTITY,
-                        "FORUM_422_TAG_NOT_ALLOWED",
-                        "Tag is not allowed for normal user"
-                );
+        List<ForumTag> tags = forumTagMapper.selectBatchIds(tagIds);
+        for (ForumTag tag : tags) {
+            if (Boolean.TRUE.equals(tag.getAdminOnly())) {
+                throw new BusinessException(HttpStatus.UNPROCESSABLE_ENTITY, "FORUM_422_TAG_NOT_ALLOWED", "Tag is not allowed for normal user");
             }
         }
     }
 
-    private CurrentUser currentUser() {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        if (authentication == null || !authentication.isAuthenticated() || authentication instanceof AnonymousAuthenticationToken) {
-            throw new BusinessException(HttpStatus.UNAUTHORIZED, "AUTH_401_UNAUTHORIZED", "Unauthorized");
+    private void saveTagRels(Long postId, List<Long> tagIds) {
+        if (tagIds == null) return;
+        for (Long tagId : tagIds) {
+            ForumPostTagRel rel = new ForumPostTagRel();
+            rel.setPostId(postId);
+            rel.setTagId(tagId);
+            forumPostTagRelMapper.insert(rel);
         }
-        String userUuid = String.valueOf(authentication.getPrincipal());
-        List<String> roles = new ArrayList<>();
-        for (GrantedAuthority authority : authentication.getAuthorities()) {
-            String auth = authority.getAuthority();
-            if (auth != null && auth.startsWith("ROLE_")) {
-                roles.add(auth.substring(5));
-            }
-        }
-        String role = roles.stream().findFirst().orElse("USER");
-        return new CurrentUser(userUuid, role);
     }
 
-    private void requireAdmin(String role) {
-        if (!"ADMIN".equals(role)) {
+    private void requireAdmin() {
+        if (!SecurityContextHelper.isAdmin()) {
             throw new BusinessException(HttpStatus.FORBIDDEN, "ADMIN_403_ONLY_ADMIN", "Only admin can access");
         }
-    }
-
-    public record CreatePostCommand(String title, String content, List<Long> tagIds) {
-    }
-
-    public record UpdatePostCommand(String title, String content, List<Long> tagIds) {
-    }
-
-    public record PostView(Long id, String authorUuid, String title, String content, String reviewStatus, boolean pinned) {
-    }
-
-    private record CurrentUser(String userUuid, String role) {
     }
 }

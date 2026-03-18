@@ -8,3 +8,7 @@ spring:
       initialization-fail-timeout: -1
   flyway:
     enabled: false
+
+mybatis-plus:
+  configuration:
+    default-enum-type-handler: org.apache.ibatis.type.EnumTypeHandler

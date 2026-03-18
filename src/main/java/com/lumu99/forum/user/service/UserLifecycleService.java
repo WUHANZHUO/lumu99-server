@@ -1,65 +1,44 @@
 package com.lumu99.forum.user.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.lumu99.forum.auth.security.JwtService;
+import com.lumu99.forum.common.enums.UserStatus;
 import com.lumu99.forum.common.exception.BusinessException;
-import com.lumu99.forum.user.repository.UserRepository;
+import com.lumu99.forum.common.security.SecurityContextHelper;
+import com.lumu99.forum.domain.User;
+import com.lumu99.forum.mapper.UserMapper;
 import org.springframework.http.HttpStatus;
-import org.springframework.security.authentication.AnonymousAuthenticationToken;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
-import org.springframework.util.StringUtils;
 
 @Service
 public class UserLifecycleService {
 
-    private final UserRepository userRepository;
+    private final UserMapper userMapper;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
 
-    public UserLifecycleService(UserRepository userRepository,
+    public UserLifecycleService(UserMapper userMapper,
                                 PasswordEncoder passwordEncoder,
                                 JwtService jwtService) {
-        this.userRepository = userRepository;
+        this.userMapper = userMapper;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
     }
 
     public LoginResult login(String username, String password) {
-        UserRepository.UserRecord user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new BusinessException(
-                        HttpStatus.UNAUTHORIZED,
-                        "LOGIN_401_INVALID_CREDENTIALS",
-                        "Invalid username or password"
-                ));
-
-        if (!passwordEncoder.matches(password, user.passwordHash())) {
-            throw new BusinessException(
-                    HttpStatus.UNAUTHORIZED,
-                    "LOGIN_401_INVALID_CREDENTIALS",
-                    "Invalid username or password"
-            );
+        User user = userMapper.selectOne(new LambdaQueryWrapper<User>().eq(User::getUsername, username));
+        if (user == null || !passwordEncoder.matches(password, user.getPasswordHash())) {
+            throw new BusinessException(HttpStatus.UNAUTHORIZED, "LOGIN_401_INVALID_CREDENTIALS", "Invalid username or password");
         }
-
-        if ("BANNED".equals(user.status())) {
-            throw new BusinessException(
-                    HttpStatus.FORBIDDEN,
-                    "LOGIN_403_ACCOUNT_BANNED",
-                    "Account is banned"
-            );
+        if (user.getStatus() == UserStatus.BANNED) {
+            throw new BusinessException(HttpStatus.FORBIDDEN, "LOGIN_403_ACCOUNT_BANNED", "Account is banned");
         }
-
-        if ("DEACTIVATED".equals(user.status())) {
-            throw new BusinessException(
-                    HttpStatus.FORBIDDEN,
-                    "LOGIN_403_ACCOUNT_DEACTIVATED",
-                    "Account is deactivated"
-            );
+        if (user.getStatus() == UserStatus.DEACTIVATED) {
+            throw new BusinessException(HttpStatus.FORBIDDEN, "LOGIN_403_ACCOUNT_DEACTIVATED", "Account is deactivated");
         }
-
-        String token = jwtService.generateToken(user.userUuid(), user.role());
-        return new LoginResult(token, user.userUuid(), user.role());
+        String token = jwtService.generateToken(user.getUserUuid(), user.getRole().name());
+        return new LoginResult(token, user.getUserUuid(), user.getRole().name());
     }
 
     public void logout() {
@@ -67,46 +46,37 @@ public class UserLifecycleService {
     }
 
     public void changeUsername(String userUuid, String newUsername) {
-        if (userRepository.existsByUsername(newUsername)) {
-            throw new BusinessException(
-                    HttpStatus.CONFLICT,
-                    "REG_409_USERNAME_EXISTS",
-                    "Username already exists"
-            );
+        if (userMapper.selectOne(new LambdaQueryWrapper<User>().eq(User::getUsername, newUsername)) != null) {
+            throw new BusinessException(HttpStatus.CONFLICT, "REG_409_USERNAME_EXISTS", "Username already exists");
         }
-        int updated = userRepository.updateUsername(userUuid, newUsername);
-        if (updated == 0) {
-            throw new BusinessException(HttpStatus.UNAUTHORIZED, "AUTH_401_UNAUTHORIZED", "Unauthorized");
-        }
+        User user = requireUser(userUuid);
+        user.setUsername(newUsername);
+        userMapper.updateById(user);
     }
 
     public void changePassword(String userUuid, String newPassword) {
-        String passwordHash = passwordEncoder.encode(newPassword);
-        int updated = userRepository.updatePasswordHash(userUuid, passwordHash);
-        if (updated == 0) {
-            throw new BusinessException(HttpStatus.UNAUTHORIZED, "AUTH_401_UNAUTHORIZED", "Unauthorized");
-        }
+        User user = requireUser(userUuid);
+        user.setPasswordHash(passwordEncoder.encode(newPassword));
+        userMapper.updateById(user);
     }
 
     public void deactivate(String userUuid) {
-        int updated = userRepository.updateStatus(userUuid, "DEACTIVATED");
-        if (updated == 0) {
-            throw new BusinessException(HttpStatus.UNAUTHORIZED, "AUTH_401_UNAUTHORIZED", "Unauthorized");
-        }
+        User user = requireUser(userUuid);
+        user.setStatus(UserStatus.DEACTIVATED);
+        userMapper.updateById(user);
     }
 
     public String currentUserUuid() {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        if (authentication == null || !authentication.isAuthenticated() || authentication instanceof AnonymousAuthenticationToken) {
-            throw new BusinessException(HttpStatus.UNAUTHORIZED, "AUTH_401_UNAUTHORIZED", "Unauthorized");
-        }
-        Object principal = authentication.getPrincipal();
-        if (principal instanceof String userUuid && StringUtils.hasText(userUuid) && !"anonymousUser".equals(userUuid)) {
-            return userUuid;
-        }
-        throw new BusinessException(HttpStatus.UNAUTHORIZED, "AUTH_401_UNAUTHORIZED", "Unauthorized");
+        return SecurityContextHelper.currentUserUuid();
     }
 
-    public record LoginResult(String token, String userUuid, String role) {
+    private User requireUser(String userUuid) {
+        User user = userMapper.selectOne(new LambdaQueryWrapper<User>().eq(User::getUserUuid, userUuid));
+        if (user == null) {
+            throw new BusinessException(HttpStatus.UNAUTHORIZED, "AUTH_401_UNAUTHORIZED", "Unauthorized");
+        }
+        return user;
     }
+
+    public record LoginResult(String token, String userUuid, String role) {}
 }

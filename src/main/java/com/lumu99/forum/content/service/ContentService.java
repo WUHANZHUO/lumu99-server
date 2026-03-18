@@ -1,173 +1,169 @@
 package com.lumu99.forum.content.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.lumu99.forum.common.enums.ContentStatus;
 import com.lumu99.forum.common.exception.BusinessException;
+import com.lumu99.forum.common.security.SecurityContextHelper;
+import com.lumu99.forum.domain.AdminSettings;
+import com.lumu99.forum.domain.content.BaseContent;
+import com.lumu99.forum.domain.content.ContentEvent;
+import com.lumu99.forum.domain.content.ContentPhoto;
+import com.lumu99.forum.domain.content.ContentStory;
+import com.lumu99.forum.domain.content.ContentTimeline;
+import com.lumu99.forum.domain.content.ContentVideo;
+import com.lumu99.forum.domain.content.ContentWorld;
+import com.lumu99.forum.dto.request.ContentRequest;
+import com.lumu99.forum.dto.response.ContentResponse;
+import com.lumu99.forum.mapper.AdminSettingsMapper;
+import com.lumu99.forum.mapper.content.ContentEventMapper;
+import com.lumu99.forum.mapper.content.ContentPhotoMapper;
+import com.lumu99.forum.mapper.content.ContentStoryMapper;
+import com.lumu99.forum.mapper.content.ContentTimelineMapper;
+import com.lumu99.forum.mapper.content.ContentVideoMapper;
+import com.lumu99.forum.mapper.content.ContentWorldMapper;
 import org.springframework.http.HttpStatus;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.support.GeneratedKeyHolder;
-import org.springframework.jdbc.support.KeyHolder;
-import org.springframework.security.authentication.AnonymousAuthenticationToken;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.GrantedAuthority;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
-import java.sql.PreparedStatement;
 import java.util.List;
+import java.util.function.Supplier;
 
 @Service
 public class ContentService {
 
-    private final JdbcTemplate jdbcTemplate;
+    private final ContentStoryMapper storyMapper;
+    private final ContentTimelineMapper timelineMapper;
+    private final ContentPhotoMapper photoMapper;
+    private final ContentVideoMapper videoMapper;
+    private final ContentWorldMapper worldMapper;
+    private final ContentEventMapper eventMapper;
+    private final AdminSettingsMapper adminSettingsMapper;
 
-    public ContentService(JdbcTemplate jdbcTemplate) {
-        this.jdbcTemplate = jdbcTemplate;
+    public ContentService(ContentStoryMapper storyMapper,
+                          ContentTimelineMapper timelineMapper,
+                          ContentPhotoMapper photoMapper,
+                          ContentVideoMapper videoMapper,
+                          ContentWorldMapper worldMapper,
+                          ContentEventMapper eventMapper,
+                          AdminSettingsMapper adminSettingsMapper) {
+        this.storyMapper = storyMapper;
+        this.timelineMapper = timelineMapper;
+        this.photoMapper = photoMapper;
+        this.videoMapper = videoMapper;
+        this.worldMapper = worldMapper;
+        this.eventMapper = eventMapper;
+        this.adminSettingsMapper = adminSettingsMapper;
     }
 
-    public List<ContentView> list(Module module) {
-        boolean guest = isGuest();
-        enforceGuestVisibility(module, guest);
-        return jdbcTemplate.query(
-                "SELECT id, title, body, resource_url, status, is_pinned FROM " + module.table + " ORDER BY is_pinned DESC, id DESC",
-                (rs, rowNum) -> new ContentView(
-                        rs.getLong("id"),
-                        rs.getString("title"),
-                        rs.getString("body"),
-                        rs.getString("resource_url"),
-                        rs.getString("status"),
-                        rs.getBoolean("is_pinned")
-                )
-        );
+    public List<ContentResponse> list(Module module) {
+        enforceGuestVisibility(module);
+        return getMapper(module).selectList(
+                new LambdaQueryWrapper<BaseContent>()
+                        .orderByDesc(BaseContent::getIsPinned)
+                        .orderByDesc(BaseContent::getId)
+        ).stream().map(ContentResponse::from).toList();
     }
 
-    public ContentView create(Module module, ContentCommand command) {
+    public ContentResponse create(Module module, ContentRequest request) {
         requireAdmin();
-        KeyHolder keyHolder = new GeneratedKeyHolder();
-        jdbcTemplate.update(connection -> {
-            PreparedStatement ps = connection.prepareStatement(
-                    "INSERT INTO " + module.table + " (title, body, resource_url, status, is_pinned, created_by, updated_by) VALUES (?, ?, ?, ?, false, ?, ?)",
-                    new String[]{"id"}
-            );
-            ps.setString(1, command.title());
-            ps.setString(2, command.body());
-            ps.setString(3, command.resourceUrl());
-            ps.setString(4, command.status());
-            ps.setString(5, currentUserUuid());
-            ps.setString(6, currentUserUuid());
-            return ps;
-        }, keyHolder);
-        Long id = keyHolder.getKey() == null ? null : keyHolder.getKey().longValue();
-        if (id == null) {
-            throw new IllegalStateException("Failed to create content");
-        }
-        return get(module, id);
+        String userUuid = SecurityContextHelper.currentUserUuid();
+        BaseContent entity = newEntity(module);
+        entity.setTitle(request.title());
+        entity.setBody(request.body());
+        entity.setResourceUrl(request.resourceUrl());
+        entity.setStatus(parseStatus(request.status()));
+        entity.setIsPinned(false);
+        entity.setCreatedBy(userUuid);
+        entity.setUpdatedBy(userUuid);
+        getMapper(module).insert(entity);
+        return ContentResponse.from(entity);
     }
 
-    public ContentView update(Module module, Long id, ContentCommand command) {
+    public ContentResponse update(Module module, Long id, ContentRequest request) {
         requireAdmin();
-        jdbcTemplate.update(
-                "UPDATE " + module.table + " SET title=?, body=?, resource_url=?, status=?, updated_by=? WHERE id = ?",
-                command.title(),
-                command.body(),
-                command.resourceUrl(),
-                command.status(),
-                currentUserUuid(),
-                id
-        );
-        return get(module, id);
+        String userUuid = SecurityContextHelper.currentUserUuid();
+        BaseContent entity = requireContent(module, id);
+        entity.setTitle(request.title());
+        entity.setBody(request.body());
+        entity.setResourceUrl(request.resourceUrl());
+        entity.setStatus(parseStatus(request.status()));
+        entity.setUpdatedBy(userUuid);
+        getMapper(module).updateById(entity);
+        return ContentResponse.from(entity);
     }
 
     public void delete(Module module, Long id) {
         requireAdmin();
-        jdbcTemplate.update("DELETE FROM " + module.table + " WHERE id = ?", id);
+        getMapper(module).deleteById(id);
     }
 
-    public ContentView pin(Module module, Long id, boolean pinned) {
+    public ContentResponse pin(Module module, Long id, boolean pinned) {
         requireAdmin();
-        jdbcTemplate.update("UPDATE " + module.table + " SET is_pinned = ?, updated_by = ? WHERE id = ?", pinned, currentUserUuid(), id);
-        return get(module, id);
+        BaseContent entity = requireContent(module, id);
+        entity.setIsPinned(pinned);
+        entity.setUpdatedBy(SecurityContextHelper.currentUserUuid());
+        getMapper(module).updateById(entity);
+        return ContentResponse.from(entity);
     }
 
-    private ContentView get(Module module, Long id) {
-        List<ContentView> list = jdbcTemplate.query(
-                "SELECT id, title, body, resource_url, status, is_pinned FROM " + module.table + " WHERE id = ?",
-                (rs, rowNum) -> new ContentView(
-                        rs.getLong("id"),
-                        rs.getString("title"),
-                        rs.getString("body"),
-                        rs.getString("resource_url"),
-                        rs.getString("status"),
-                        rs.getBoolean("is_pinned")
-                ),
-                id
-        );
-        if (list.isEmpty()) {
+    private BaseContent requireContent(Module module, Long id) {
+        BaseContent entity = getMapper(module).selectById(id);
+        if (entity == null) {
             throw new BusinessException(HttpStatus.NOT_FOUND, "REQ_404_NOT_FOUND", "Content not found");
         }
-        return list.get(0);
+        return entity;
     }
 
-    private void enforceGuestVisibility(Module module, boolean guest) {
-        if (!guest) {
-            return;
+    private void enforceGuestVisibility(Module module) {
+        if (!SecurityContextHelper.isGuest()) return;
+        AdminSettings settings = adminSettingsMapper.selectById(1L);
+        if (module == Module.WORLD && (settings == null || !Boolean.TRUE.equals(settings.getWorldGuestVisible()))) {
+            throw new BusinessException(HttpStatus.FORBIDDEN, "AUTH_403_FORBIDDEN", "World is not visible for guest");
         }
-        if (module == Module.WORLD) {
-            Boolean visible = jdbcTemplate.queryForObject("SELECT world_guest_visible FROM admin_settings WHERE id = 1", Boolean.class);
-            if (!Boolean.TRUE.equals(visible)) {
-                throw new BusinessException(HttpStatus.FORBIDDEN, "AUTH_403_FORBIDDEN", "World is not visible for guest");
-            }
+        if (module == Module.EVENT && (settings == null || !Boolean.TRUE.equals(settings.getEventsGuestVisible()))) {
+            throw new BusinessException(HttpStatus.FORBIDDEN, "AUTH_403_FORBIDDEN", "Event is not visible for guest");
         }
-        if (module == Module.EVENT) {
-            Boolean visible = jdbcTemplate.queryForObject("SELECT events_guest_visible FROM admin_settings WHERE id = 1", Boolean.class);
-            if (!Boolean.TRUE.equals(visible)) {
-                throw new BusinessException(HttpStatus.FORBIDDEN, "AUTH_403_FORBIDDEN", "Event is not visible for guest");
-            }
-        }
-    }
-
-    private boolean isGuest() {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        return auth == null || !auth.isAuthenticated() || auth instanceof AnonymousAuthenticationToken;
     }
 
     private void requireAdmin() {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth == null || !auth.isAuthenticated() || auth instanceof AnonymousAuthenticationToken) {
-            throw new BusinessException(HttpStatus.UNAUTHORIZED, "AUTH_401_UNAUTHORIZED", "Unauthorized");
-        }
-        boolean isAdmin = auth.getAuthorities().stream()
-                .map(GrantedAuthority::getAuthority)
-                .anyMatch("ROLE_ADMIN"::equals);
-        if (!isAdmin) {
+        if (!SecurityContextHelper.isAdmin()) {
             throw new BusinessException(HttpStatus.FORBIDDEN, "ADMIN_403_ONLY_ADMIN", "Only admin can access");
         }
     }
 
-    private String currentUserUuid() {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth == null || !auth.isAuthenticated() || auth instanceof AnonymousAuthenticationToken) {
-            throw new BusinessException(HttpStatus.UNAUTHORIZED, "AUTH_401_UNAUTHORIZED", "Unauthorized");
+    private ContentStatus parseStatus(String status) {
+        if (status == null) return ContentStatus.PUBLISHED;
+        try {
+            return ContentStatus.valueOf(status.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            return ContentStatus.PUBLISHED;
         }
-        return String.valueOf(auth.getPrincipal());
     }
 
-    public record ContentCommand(String title, String body, String resourceUrl, String status) {
+    @SuppressWarnings("unchecked")
+    private <T extends BaseContent> BaseMapper<T> getMapper(Module module) {
+        return (BaseMapper<T>) switch (module) {
+            case STORY -> storyMapper;
+            case TIMELINE -> timelineMapper;
+            case PHOTO -> photoMapper;
+            case VIDEO -> videoMapper;
+            case WORLD -> worldMapper;
+            case EVENT -> eventMapper;
+        };
     }
 
-    public record ContentView(Long id, String title, String body, String resourceUrl, String status, boolean pinned) {
+    private BaseContent newEntity(Module module) {
+        return switch (module) {
+            case STORY -> new ContentStory();
+            case TIMELINE -> new ContentTimeline();
+            case PHOTO -> new ContentPhoto();
+            case VIDEO -> new ContentVideo();
+            case WORLD -> new ContentWorld();
+            case EVENT -> new ContentEvent();
+        };
     }
 
     public enum Module {
-        STORY("content_story"),
-        TIMELINE("content_timeline"),
-        PHOTO("content_photo"),
-        VIDEO("content_video"),
-        WORLD("content_world"),
-        EVENT("content_event");
-
-        private final String table;
-
-        Module(String table) {
-            this.table = table;
-        }
+        STORY, TIMELINE, PHOTO, VIDEO, WORLD, EVENT
     }
 }

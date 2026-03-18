@@ -1,11 +1,19 @@
 package com.lumu99.forum.admin.controller;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.lumu99.forum.domain.QuizConfig;
+import com.lumu99.forum.domain.QuizOption;
+import com.lumu99.forum.domain.QuizQuestion;
+import com.lumu99.forum.mapper.QuizConfigMapper;
+import com.lumu99.forum.mapper.QuizOptionMapper;
+import com.lumu99.forum.mapper.QuizQuestionMapper;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -22,67 +30,63 @@ import java.util.Map;
 @RequestMapping("/admin/quiz")
 public class AdminQuizController {
 
-    private final JdbcTemplate jdbcTemplate;
+    private final QuizQuestionMapper quizQuestionMapper;
+    private final QuizOptionMapper quizOptionMapper;
+    private final QuizConfigMapper quizConfigMapper;
 
-    public AdminQuizController(JdbcTemplate jdbcTemplate) {
-        this.jdbcTemplate = jdbcTemplate;
+    public AdminQuizController(QuizQuestionMapper quizQuestionMapper,
+                               QuizOptionMapper quizOptionMapper,
+                               QuizConfigMapper quizConfigMapper) {
+        this.quizQuestionMapper = quizQuestionMapper;
+        this.quizOptionMapper = quizOptionMapper;
+        this.quizConfigMapper = quizConfigMapper;
     }
 
     @GetMapping("/questions")
     public ResponseEntity<Map<String, Object>> listQuestions() {
-        List<QuizQuestionResponse> questions = jdbcTemplate.query(
-                "SELECT id, question_type, stem, answer_text, enabled FROM quiz_questions ORDER BY id DESC",
-                (rs, rowNum) -> new QuizQuestionResponse(
-                        rs.getLong("id"),
-                        rs.getString("question_type"),
-                        rs.getString("stem"),
-                        rs.getString("answer_text"),
-                        rs.getBoolean("enabled")
-                )
+        List<QuizQuestion> questions = quizQuestionMapper.selectList(
+                new LambdaQueryWrapper<QuizQuestion>().orderByDesc(QuizQuestion::getId)
         );
         return ResponseEntity.ok(Map.of("data", questions));
     }
 
     @PostMapping("/questions")
     public ResponseEntity<Map<String, Object>> createQuestion(@Valid @RequestBody QuizQuestionRequest request) {
-        jdbcTemplate.update(
-                "INSERT INTO quiz_questions (question_type, stem, answer_text, enabled) VALUES (?, ?, ?, ?)",
-                request.questionType(),
-                request.stem(),
-                request.answerText(),
-                request.enabled()
-        );
+        QuizQuestion question = new QuizQuestion();
+        question.setQuestionType(request.questionType());
+        question.setStem(request.stem());
+        question.setAnswerText(request.answerText());
+        question.setEnabled(request.enabled());
+        quizQuestionMapper.insert(question);
         return ResponseEntity.status(HttpStatus.CREATED).body(Map.of("message", "OK"));
     }
 
     @PutMapping("/questions/{id}")
     public ResponseEntity<Map<String, Object>> updateQuestion(@PathVariable Long id,
                                                               @Valid @RequestBody QuizQuestionRequest request) {
-        jdbcTemplate.update(
-                "UPDATE quiz_questions SET question_type=?, stem=?, answer_text=?, enabled=? WHERE id = ?",
-                request.questionType(),
-                request.stem(),
-                request.answerText(),
-                request.enabled(),
-                id
-        );
+        quizQuestionMapper.update(new LambdaUpdateWrapper<QuizQuestion>()
+                .eq(QuizQuestion::getId, id)
+                .set(QuizQuestion::getQuestionType, request.questionType())
+                .set(QuizQuestion::getStem, request.stem())
+                .set(QuizQuestion::getAnswerText, request.answerText())
+                .set(QuizQuestion::getEnabled, request.enabled()));
         return ResponseEntity.ok(Map.of("message", "OK"));
     }
 
+    @Transactional
     @DeleteMapping("/questions/{id}")
     public ResponseEntity<Map<String, Object>> deleteQuestion(@PathVariable Long id) {
-        jdbcTemplate.update("DELETE FROM quiz_options WHERE question_id = ?", id);
-        jdbcTemplate.update("DELETE FROM quiz_questions WHERE id = ?", id);
+        quizOptionMapper.delete(new LambdaQueryWrapper<QuizOption>().eq(QuizOption::getQuestionId, id));
+        quizQuestionMapper.deleteById(id);
         return ResponseEntity.ok(Map.of("message", "OK"));
     }
 
     @PutMapping("/config")
     public ResponseEntity<Map<String, Object>> updateConfig(@Valid @RequestBody QuizConfigRequest request) {
-        jdbcTemplate.update(
-                "UPDATE quiz_config SET question_count = ?, pass_score = ? WHERE id = 1",
-                request.questionCount(),
-                request.passScore()
-        );
+        quizConfigMapper.update(new LambdaUpdateWrapper<QuizConfig>()
+                .eq(QuizConfig::getId, 1L)
+                .set(QuizConfig::getQuestionCount, request.questionCount())
+                .set(QuizConfig::getPassScore, request.passScore()));
         return ResponseEntity.ok(Map.of("data", request));
     }
 
@@ -91,21 +95,10 @@ public class AdminQuizController {
             @NotBlank String stem,
             @NotBlank String answerText,
             @NotNull Boolean enabled
-    ) {
-    }
-
-    public record QuizQuestionResponse(
-            Long id,
-            String questionType,
-            String stem,
-            String answerText,
-            boolean enabled
-    ) {
-    }
+    ) {}
 
     public record QuizConfigRequest(
             @NotNull Integer questionCount,
             @NotNull Integer passScore
-    ) {
-    }
+    ) {}
 }

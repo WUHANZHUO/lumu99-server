@@ -1,5 +1,6 @@
 package com.lumu99.forum.review.controller;
 
+import com.lumu99.forum.dto.response.ReviewPostResponse;
 import com.lumu99.forum.review.service.ReviewService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -28,10 +29,8 @@ public class AdminReviewController {
 
     @GetMapping("/{postId}")
     public ResponseEntity<Map<String, Object>> getPost(@PathVariable Long postId) {
-        return ResponseEntity.ok(Map.of(
-                "data",
-                reviewService.getPost(postId).orElse(null)
-        ));
+        ReviewPostResponse post = reviewService.getPost(postId).orElse(null);
+        return ResponseEntity.ok(Map.of("data", post != null ? post : Map.of()));
     }
 
     @PostMapping("/{postId}/approve")
@@ -46,6 +45,5 @@ public class AdminReviewController {
         return ResponseEntity.ok(Map.of("data", reviewService.reject(postId, reason)));
     }
 
-    public record RejectRequest(String reason) {
-    }
+    public record RejectRequest(String reason) {}
 }

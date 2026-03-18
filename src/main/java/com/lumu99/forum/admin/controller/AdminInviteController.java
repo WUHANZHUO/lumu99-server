@@ -10,7 +10,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Map;
 
 @RestController
@@ -25,9 +26,9 @@ public class AdminInviteController {
 
     @PostMapping
     public ResponseEntity<Map<String, Object>> createInviteCode(@RequestBody(required = false) CreateInviteCodeRequest request) {
-        Instant expiresAt = null;
+        LocalDateTime expiresAt = null;
         if (request != null && StringUtils.hasText(request.expiresAt())) {
-            expiresAt = Instant.parse(request.expiresAt());
+            expiresAt = LocalDateTime.parse(request.expiresAt(), DateTimeFormatter.ISO_DATE_TIME);
         }
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(Map.of("data", inviteCodeService.createInviteCode(expiresAt)));
@@ -38,6 +39,5 @@ public class AdminInviteController {
         return ResponseEntity.ok(Map.of("data", inviteCodeService.listInviteCodes()));
     }
 
-    public record CreateInviteCodeRequest(String expiresAt) {
-    }
+    public record CreateInviteCodeRequest(String expiresAt) {}
 }

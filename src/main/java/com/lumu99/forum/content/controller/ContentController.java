@@ -1,8 +1,8 @@
 package com.lumu99.forum.content.controller;
 
 import com.lumu99.forum.content.service.ContentService;
+import com.lumu99.forum.dto.request.ContentRequest;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotBlank;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -209,20 +209,11 @@ public class ContentController {
     }
 
     private ResponseEntity<Map<String, Object>> create(ContentService.Module module, ContentRequest request) {
-        ContentService.ContentView created = contentService.create(
-                module,
-                new ContentService.ContentCommand(request.title(), request.body(), request.resourceUrl(), request.status())
-        );
-        return ResponseEntity.status(HttpStatus.CREATED).body(Map.of("data", created));
+        return ResponseEntity.status(HttpStatus.CREATED).body(Map.of("data", contentService.create(module, request)));
     }
 
     private ResponseEntity<Map<String, Object>> update(ContentService.Module module, Long id, ContentRequest request) {
-        ContentService.ContentView updated = contentService.update(
-                module,
-                id,
-                new ContentService.ContentCommand(request.title(), request.body(), request.resourceUrl(), request.status())
-        );
-        return ResponseEntity.ok(Map.of("data", updated));
+        return ResponseEntity.ok(Map.of("data", contentService.update(module, id, request)));
     }
 
     private ResponseEntity<Map<String, Object>> delete(ContentService.Module module, Long id) {
@@ -234,11 +225,4 @@ public class ContentController {
         return ResponseEntity.ok(Map.of("data", contentService.pin(module, id, pinned)));
     }
 
-    public record ContentRequest(
-            @NotBlank String title,
-            String body,
-            String resourceUrl,
-            @NotBlank String status
-    ) {
-    }
 }

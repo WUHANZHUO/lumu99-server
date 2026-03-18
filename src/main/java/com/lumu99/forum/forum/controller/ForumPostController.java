@@ -1,8 +1,10 @@
 package com.lumu99.forum.forum.controller;
 
+import com.lumu99.forum.dto.request.CreatePostRequest;
+import com.lumu99.forum.dto.request.UpdatePostRequest;
+import com.lumu99.forum.dto.response.PostResponse;
 import com.lumu99.forum.forum.service.ForumPostService;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotBlank;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -29,30 +31,27 @@ public class ForumPostController {
 
     @GetMapping
     public ResponseEntity<Map<String, Object>> listPosts() {
-        return ResponseEntity.ok(Map.of("data", forumPostService.listPosts()));
+        List<PostResponse> posts = forumPostService.listPosts();
+        return ResponseEntity.ok(Map.of("data", posts));
     }
 
     @PostMapping
-    public ResponseEntity<Map<String, Object>> createPost(@Valid @RequestBody PostRequest request) {
-        ForumPostService.PostView post = forumPostService.createPost(
-                new ForumPostService.CreatePostCommand(request.title(), request.content(), request.tagIds())
-        );
+    public ResponseEntity<Map<String, Object>> createPost(@Valid @RequestBody CreatePostRequest request) {
+        PostResponse post = forumPostService.createPost(request);
         return ResponseEntity.status(HttpStatus.CREATED).body(Map.of("data", post));
     }
 
     @GetMapping("/{postId}")
     public ResponseEntity<Map<String, Object>> getPost(@PathVariable Long postId) {
-        ForumPostService.PostView post = forumPostService.getPost(postId)
+        PostResponse post = forumPostService.getPost(postId)
                 .orElseThrow(() -> new IllegalArgumentException("Post not found"));
         return ResponseEntity.ok(Map.of("data", post));
     }
 
     @PutMapping("/{postId}")
-    public ResponseEntity<Map<String, Object>> updatePost(@PathVariable Long postId, @Valid @RequestBody PostRequest request) {
-        ForumPostService.PostView post = forumPostService.updatePost(
-                postId,
-                new ForumPostService.UpdatePostCommand(request.title(), request.content(), request.tagIds())
-        );
+    public ResponseEntity<Map<String, Object>> updatePost(@PathVariable Long postId,
+                                                           @Valid @RequestBody UpdatePostRequest request) {
+        PostResponse post = forumPostService.updatePost(postId, request);
         return ResponseEntity.ok(Map.of("data", post));
     }
 
@@ -64,20 +63,11 @@ public class ForumPostController {
 
     @PostMapping("/{postId}/pin")
     public ResponseEntity<Map<String, Object>> pinPost(@PathVariable Long postId) {
-        ForumPostService.PostView post = forumPostService.pinPost(postId);
-        return ResponseEntity.ok(Map.of("data", post));
+        return ResponseEntity.ok(Map.of("data", forumPostService.pinPost(postId)));
     }
 
     @DeleteMapping("/{postId}/pin")
     public ResponseEntity<Map<String, Object>> unpinPost(@PathVariable Long postId) {
-        ForumPostService.PostView post = forumPostService.unpinPost(postId);
-        return ResponseEntity.ok(Map.of("data", post));
-    }
-
-    public record PostRequest(
-            @NotBlank String title,
-            @NotBlank String content,
-            List<Long> tagIds
-    ) {
+        return ResponseEntity.ok(Map.of("data", forumPostService.unpinPost(postId)));
     }
 }

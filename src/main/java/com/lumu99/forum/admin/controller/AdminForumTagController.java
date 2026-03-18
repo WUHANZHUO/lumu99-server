@@ -1,11 +1,14 @@
 package com.lumu99.forum.admin.controller;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.lumu99.forum.domain.ForumTag;
+import com.lumu99.forum.mapper.ForumTagMapper;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -22,52 +25,44 @@ import java.util.Map;
 @RequestMapping("/admin/forum-tags")
 public class AdminForumTagController {
 
-    private final JdbcTemplate jdbcTemplate;
+    private final ForumTagMapper forumTagMapper;
 
-    public AdminForumTagController(JdbcTemplate jdbcTemplate) {
-        this.jdbcTemplate = jdbcTemplate;
+    public AdminForumTagController(ForumTagMapper forumTagMapper) {
+        this.forumTagMapper = forumTagMapper;
     }
 
     @GetMapping
     public ResponseEntity<Map<String, Object>> list() {
-        List<ForumTagResponse> tags = jdbcTemplate.query(
-                "SELECT id, name, admin_only, enabled FROM forum_tags ORDER BY id DESC",
-                (rs, rowNum) -> new ForumTagResponse(
-                        rs.getLong("id"),
-                        rs.getString("name"),
-                        rs.getBoolean("admin_only"),
-                        rs.getBoolean("enabled")
-                )
+        List<ForumTag> tags = forumTagMapper.selectList(
+                new LambdaQueryWrapper<ForumTag>().orderByDesc(ForumTag::getId)
         );
         return ResponseEntity.ok(Map.of("data", tags));
     }
 
     @PostMapping
     public ResponseEntity<Map<String, Object>> create(@Valid @RequestBody ForumTagRequest request) {
-        jdbcTemplate.update(
-                "INSERT INTO forum_tags (name, admin_only, enabled) VALUES (?, ?, ?)",
-                request.name(),
-                request.adminOnly(),
-                request.enabled()
-        );
+        ForumTag tag = new ForumTag();
+        tag.setName(request.name());
+        tag.setAdminOnly(request.adminOnly());
+        tag.setEnabled(request.enabled());
+        forumTagMapper.insert(tag);
         return ResponseEntity.status(HttpStatus.CREATED).body(Map.of("message", "OK"));
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<Map<String, Object>> update(@PathVariable Long id, @Valid @RequestBody ForumTagRequest request) {
-        jdbcTemplate.update(
-                "UPDATE forum_tags SET name = ?, admin_only = ?, enabled = ? WHERE id = ?",
-                request.name(),
-                request.adminOnly(),
-                request.enabled(),
-                id
-        );
+    public ResponseEntity<Map<String, Object>> update(@PathVariable Long id,
+                                                      @Valid @RequestBody ForumTagRequest request) {
+        forumTagMapper.update(new LambdaUpdateWrapper<ForumTag>()
+                .eq(ForumTag::getId, id)
+                .set(ForumTag::getName, request.name())
+                .set(ForumTag::getAdminOnly, request.adminOnly())
+                .set(ForumTag::getEnabled, request.enabled()));
         return ResponseEntity.ok(Map.of("message", "OK"));
     }
 
     @DeleteMapping("/{id}")
     public ResponseEntity<Map<String, Object>> delete(@PathVariable Long id) {
-        jdbcTemplate.update("DELETE FROM forum_tags WHERE id = ?", id);
+        forumTagMapper.deleteById(id);
         return ResponseEntity.ok(Map.of("message", "OK"));
     }
 
@@ -75,14 +70,5 @@ public class AdminForumTagController {
             @NotBlank String name,
             @NotNull Boolean adminOnly,
             @NotNull Boolean enabled
-    ) {
-    }
-
-    public record ForumTagResponse(
-            Long id,
-            String name,
-            boolean adminOnly,
-            boolean enabled
-    ) {
-    }
+    ) {}
 }

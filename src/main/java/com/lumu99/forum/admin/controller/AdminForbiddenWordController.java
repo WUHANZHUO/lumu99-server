@@ -1,11 +1,14 @@
 package com.lumu99.forum.admin.controller;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.lumu99.forum.domain.ForbiddenWord;
+import com.lumu99.forum.mapper.ForbiddenWordMapper;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -22,62 +25,47 @@ import java.util.Map;
 @RequestMapping("/admin/forbidden-words")
 public class AdminForbiddenWordController {
 
-    private final JdbcTemplate jdbcTemplate;
+    private final ForbiddenWordMapper forbiddenWordMapper;
 
-    public AdminForbiddenWordController(JdbcTemplate jdbcTemplate) {
-        this.jdbcTemplate = jdbcTemplate;
+    public AdminForbiddenWordController(ForbiddenWordMapper forbiddenWordMapper) {
+        this.forbiddenWordMapper = forbiddenWordMapper;
     }
 
     @GetMapping
     public ResponseEntity<Map<String, Object>> list() {
-        List<ForbiddenWordResponse> words = jdbcTemplate.query(
-                "SELECT id, word, enabled FROM forbidden_words ORDER BY id DESC",
-                (rs, rowNum) -> new ForbiddenWordResponse(
-                        rs.getLong("id"),
-                        rs.getString("word"),
-                        rs.getBoolean("enabled")
-                )
+        List<ForbiddenWord> words = forbiddenWordMapper.selectList(
+                new LambdaQueryWrapper<ForbiddenWord>().orderByDesc(ForbiddenWord::getId)
         );
         return ResponseEntity.ok(Map.of("data", words));
     }
 
     @PostMapping
     public ResponseEntity<Map<String, Object>> create(@Valid @RequestBody ForbiddenWordRequest request) {
-        jdbcTemplate.update(
-                "INSERT INTO forbidden_words (word, enabled) VALUES (?, ?)",
-                request.word(),
-                request.enabled()
-        );
+        ForbiddenWord word = new ForbiddenWord();
+        word.setWord(request.word());
+        word.setEnabled(request.enabled());
+        forbiddenWordMapper.insert(word);
         return ResponseEntity.status(HttpStatus.CREATED).body(Map.of("message", "OK"));
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<Map<String, Object>> update(@PathVariable Long id, @Valid @RequestBody ForbiddenWordRequest request) {
-        jdbcTemplate.update(
-                "UPDATE forbidden_words SET word = ?, enabled = ? WHERE id = ?",
-                request.word(),
-                request.enabled(),
-                id
-        );
+    public ResponseEntity<Map<String, Object>> update(@PathVariable Long id,
+                                                      @Valid @RequestBody ForbiddenWordRequest request) {
+        forbiddenWordMapper.update(new LambdaUpdateWrapper<ForbiddenWord>()
+                .eq(ForbiddenWord::getId, id)
+                .set(ForbiddenWord::getWord, request.word())
+                .set(ForbiddenWord::getEnabled, request.enabled()));
         return ResponseEntity.ok(Map.of("message", "OK"));
     }
 
     @DeleteMapping("/{id}")
     public ResponseEntity<Map<String, Object>> delete(@PathVariable Long id) {
-        jdbcTemplate.update("DELETE FROM forbidden_words WHERE id = ?", id);
+        forbiddenWordMapper.deleteById(id);
         return ResponseEntity.ok(Map.of("message", "OK"));
     }
 
     public record ForbiddenWordRequest(
             @NotBlank String word,
             @NotNull Boolean enabled
-    ) {
-    }
-
-    public record ForbiddenWordResponse(
-            Long id,
-            String word,
-            boolean enabled
-    ) {
-    }
+    ) {}
 }

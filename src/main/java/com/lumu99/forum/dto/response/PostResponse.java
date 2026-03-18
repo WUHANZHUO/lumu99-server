@@ -1,0 +1,23 @@
+package com.lumu99.forum.dto.response;
+
+import com.lumu99.forum.domain.ForumPost;
+
+public record PostResponse(
+        Long id,
+        String authorUuid,
+        String title,
+        String content,
+        String reviewStatus,
+        boolean pinned
+) {
+    public static PostResponse from(ForumPost post) {
+        return new PostResponse(
+                post.getId(),
+                post.getAuthorUuid(),
+                post.getTitle(),
+                post.getContent(),
+                post.getReviewStatus() != null ? post.getReviewStatus().name() : null,
+                Boolean.TRUE.equals(post.getIsPinned())
+        );
+    }
+}

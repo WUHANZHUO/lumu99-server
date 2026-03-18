@@ -1,6 +1,12 @@
 package com.lumu99.forum.review.service;
 
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.lumu99.forum.common.enums.ReviewStatus;
+import com.lumu99.forum.common.enums.UserRole;
+import com.lumu99.forum.domain.AdminSettings;
+import com.lumu99.forum.domain.ForbiddenWord;
+import com.lumu99.forum.mapper.AdminSettingsMapper;
+import com.lumu99.forum.mapper.ForbiddenWordMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -10,38 +16,36 @@ import java.util.Locale;
 @Service
 public class ReviewDecisionEngine {
 
-    private final JdbcTemplate jdbcTemplate;
+    private final ForbiddenWordMapper forbiddenWordMapper;
+    private final AdminSettingsMapper adminSettingsMapper;
 
-    public ReviewDecisionEngine(JdbcTemplate jdbcTemplate) {
-        this.jdbcTemplate = jdbcTemplate;
+    public ReviewDecisionEngine(ForbiddenWordMapper forbiddenWordMapper,
+                                AdminSettingsMapper adminSettingsMapper) {
+        this.forbiddenWordMapper = forbiddenWordMapper;
+        this.adminSettingsMapper = adminSettingsMapper;
     }
 
-    public String decideReviewStatus(String operatorRole, String title, String content) {
+    public ReviewStatus decideReviewStatus(String operatorRole, String title, String content) {
         if (hitForbiddenWord(title, content)) {
-            return "PENDING";
+            return ReviewStatus.PENDING;
         }
-
-        if ("ADMIN".equalsIgnoreCase(operatorRole)) {
-            return "APPROVED";
+        if (UserRole.ADMIN.name().equalsIgnoreCase(operatorRole)) {
+            return ReviewStatus.APPROVED;
         }
-
-        boolean userPostNeedReview = Boolean.TRUE.equals(jdbcTemplate.queryForObject(
-                "SELECT forum_post_need_review FROM admin_settings WHERE id = 1",
-                Boolean.class
-        ));
-        if (userPostNeedReview) {
-            return "PENDING";
+        AdminSettings settings = adminSettingsMapper.selectById(1L);
+        if (settings != null && Boolean.TRUE.equals(settings.getForumPostNeedReview())) {
+            return ReviewStatus.PENDING;
         }
-        return "APPROVED";
+        return ReviewStatus.APPROVED;
     }
 
     private boolean hitForbiddenWord(String title, String content) {
         String plain = (safe(title) + " " + safe(content)).toLowerCase(Locale.ROOT);
-        List<String> words = jdbcTemplate.query(
-                "SELECT word FROM forbidden_words WHERE enabled = true",
-                (rs, rowNum) -> rs.getString("word")
+        List<ForbiddenWord> words = forbiddenWordMapper.selectList(
+                new LambdaQueryWrapper<ForbiddenWord>().eq(ForbiddenWord::getEnabled, true)
         );
-        for (String word : words) {
+        for (ForbiddenWord fw : words) {
+            String word = fw.getWord();
             if (StringUtils.hasText(word) && plain.contains(word.toLowerCase(Locale.ROOT))) {
                 return true;
             }
